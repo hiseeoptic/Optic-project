@@ -1,0 +1,71 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "../vendor/shadcn-tailwind-4.13.0.css";
+
+:root {
+  --background: #07110f;
+  --foreground: #eaf5ef;
+  --card: #0b1815;
+  --card-foreground: #eaf5ef;
+  --popover: #0b1815;
+  --popover-foreground: #eaf5ef;
+  --primary: #bdfc6a;
+  --primary-foreground: #07110f;
+  --secondary: #163128;
+  --secondary-foreground: #eaf5ef;
+  --muted: #13241f;
+  --muted-foreground: #91a79d;
+  --accent: #163128;
+  --accent-foreground: #eaf5ef;
+  --destructive: #ff6b6b;
+  --border: #23372f;
+  --input: #23372f;
+  --ring: #63dbc0;
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "Avenir Next", "Segoe UI", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: "Avenir Next", "Segoe UI", Arial, sans-serif; }
+button, input { font: inherit; }
+
+.dot-grid {
+  background-image:
+    radial-gradient(circle, #0a2b22 0 2.1px, transparent 2.3px),
+    linear-gradient(90deg, transparent calc(50% - .5px), rgba(68, 133, 114, .35) 50%, transparent calc(50% + .5px)),
+    linear-gradient(transparent calc(50% - .5px), rgba(68, 133, 114, .35) 50%, transparent calc(50% + .5px));
+  background-size: 20px 20px, 100% 100%, 100% 100%;
+  background-position: center;
+}
+
+@media print {
+  main > :not(.print-target) { display: none !important; }
+  .print-target { display: grid !important; min-height: 100vh; place-items: center; background: white; color: black; }
+  .print-target .dot-grid { border: 1px solid #111; }
+  @page { size: A4; margin: 10mm; }
+}
