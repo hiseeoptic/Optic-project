@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OptiAxis Lab — SPH/CYL/AXIS Prototype",
-  description: "Nguyên mẫu đo công suất và trục tròng kính bằng biến dạng lưới quang học.",
+  title: "Kính 3D & AI Studio",
+  description: "Dựng kính 3D theo kích thước thật, virtual try-on, đo PD và phân tích tròng kính.",
   other: {
     "codex-preview": "development",
   },
