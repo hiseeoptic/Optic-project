@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Aperture, Box, ChevronRight, Eye, Glasses, Info, Ruler, ScanFace, Smartphone } from "lucide-react";
+import { useState, useSyncExternalStore } from "react";
+import { Aperture, Box, ChevronRight, Eye, Glasses, Info, Ruler, ScanFace, ScanLine, Smartphone } from "lucide-react";
 import Link from "next/link";
 
 import { VirtualTryOn } from "@/components/virtual-try-on";
@@ -12,6 +12,11 @@ export default function TryOnPage() {
   const [bridge, setBridge] = useState(18);
   const [temple, setTemple] = useState(145);
   const [color, setColor] = useState("#66746e");
+  const modelUrl = useSyncExternalStore(
+    () => () => undefined,
+    () => localStorage.getItem("kinh3d.aiModelUrl"),
+    () => null,
+  );
 
   return (
     <main className="min-h-screen bg-[#07110f] text-[#eaf5ef]">
@@ -45,7 +50,7 @@ export default function TryOnPage() {
 
         <section className="order-1 min-w-0 xl:order-2">
           <div className="mb-4"><p className="mb-2 text-xs font-semibold tracking-[.18em] text-[#63dbc0]">BƯỚC 2 · CAMERA TRY-ON</p><h1 className="text-3xl font-semibold tracking-[-.04em] text-white md:text-4xl">Đeo kính 3D theo khuôn mặt</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-[#81988e]">AI bám theo hai mắt, sống mũi và góc quay đầu để đặt gọng theo thời gian thực.</p></div>
-          <VirtualTryOn lensWidth={lensWidth} lensHeight={lensHeight} bridge={bridge} temple={temple} color={color} />
+          <VirtualTryOn lensWidth={lensWidth} lensHeight={lensHeight} bridge={bridge} temple={temple} color={color} modelUrl={modelUrl} />
         </section>
 
         <aside className="order-3 space-y-4">
@@ -59,6 +64,7 @@ export default function TryOnPage() {
             </div>
             <div className="mt-5 border-t border-white/10 pt-5"><p className="mb-3 text-sm text-[#b7c7bf]">Màu gọng</p><div className="flex flex-wrap gap-2">{["#66746e", "#8b633e", "#a5a7a4", "#101010", "#274f58"].map((swatch) => <button key={swatch} aria-label={`Màu ${swatch}`} onClick={() => setColor(swatch)} style={{ background: swatch }} className={`size-9 rounded-full border-2 transition ${color === swatch ? "scale-110 border-[#bdfc6a]" : "border-white/15"}`} />)}</div></div>
           </section>
+          <section className="rounded-2xl border border-white/10 bg-[#0b1815] p-4"><div className="flex items-center gap-2 text-sm text-white"><ScanLine className="size-4 text-[#63dbc0]" /> Nguồn mô hình</div><p className="mt-2 text-sm text-[#839a90]">{modelUrl ? "Đang dùng GLB do AI tái tạo từ ảnh thật." : "Đang dùng mô hình tham số. Quét ảnh để tạo GLB thật hơn."}</p><Link href="/scan-3d" className="mt-3 inline-flex text-sm font-medium text-[#bdfc6a] hover:text-[#d0ff91]">Mở AI Scan 3D</Link></section>
           <section className="rounded-2xl border border-white/10 bg-[#0b1815] p-4 text-sm leading-6 text-[#8da39a]"><Info className="mr-2 inline size-4 text-[#63dbc0]" />Giữ mặt cách camera khoảng 40–70 cm, ánh sáng chiếu đều và tránh ngược sáng để kính bám ổn định.</section>
         </aside>
       </div>

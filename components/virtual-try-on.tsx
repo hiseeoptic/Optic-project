@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, CameraOff, Check, RefreshCw, ScanFace, ShieldCheck } from "lucide-react";
 import { FaceLandmarker, FilesetResolver, type NormalizedLandmark } from "@mediapipe/tasks-vision";
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 import { Button } from "@/components/ui/button";
 import { buildGlassesModel, disposeGlassesModel } from "@/lib/glasses-model";
@@ -17,11 +18,12 @@ type VirtualTryOnProps = {
   bridge: number;
   temple: number;
   color: string;
+  modelUrl?: string | null;
 };
 
 type Pose = { x: number; y: number; scale: number; roll: number; yaw: number };
 
-export function VirtualTryOn({ lensWidth, lensHeight, bridge, temple, color }: VirtualTryOnProps) {
+export function VirtualTryOn({ lensWidth, lensHeight, bridge, temple, color, modelUrl }: VirtualTryOnProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -76,10 +78,37 @@ export function VirtualTryOn({ lensWidth, lensHeight, bridge, temple, color }: V
     camera.position.z = 500;
     cameraRef.current = camera;
 
-    const glasses = buildGlassesModel({ lensWidth, lensHeight, bridge, temple, color });
+    let glasses = buildGlassesModel({ lensWidth, lensHeight, bridge, temple, color });
     glasses.visible = false;
     scene.add(glasses);
     glassesRef.current = glasses;
+    let fallbackDisposed = false;
+    if (modelUrl) {
+      new GLTFLoader().load(modelUrl, (gltf) => {
+        if (!mount.isConnected) {
+          disposeGlassesModel(gltf.scene);
+          return;
+        }
+        const imported = gltf.scene;
+        const box = new THREE.Box3().setFromObject(imported);
+        const size = box.getSize(new THREE.Vector3());
+        const modelWidth = lensWidth * 2 + bridge + 12;
+        imported.scale.setScalar(modelWidth / Math.max(size.x, 0.001));
+        const scaledBox = new THREE.Box3().setFromObject(imported);
+        const center = scaledBox.getCenter(new THREE.Vector3());
+        imported.position.sub(center);
+        const wrapper = new THREE.Group();
+        wrapper.name = "AI_scanned_glasses";
+        wrapper.add(imported);
+        wrapper.visible = false;
+        scene.remove(glasses);
+        disposeGlassesModel(glasses);
+        fallbackDisposed = true;
+        glasses = wrapper;
+        glassesRef.current = wrapper;
+        scene.add(wrapper);
+      });
+    }
 
     const resize = () => {
       const width = mount.clientWidth;
@@ -105,14 +134,14 @@ export function VirtualTryOn({ lensWidth, lensHeight, bridge, temple, color }: V
     return () => {
       cancelAnimationFrame(renderAnimationRef.current);
       observer.disconnect();
-      disposeGlassesModel(glasses);
+      if (!fallbackDisposed || glasses.name === "AI_scanned_glasses") disposeGlassesModel(glasses);
       renderer.dispose();
       renderer.domElement.remove();
       rendererRef.current = null;
       cameraRef.current = null;
       glassesRef.current = null;
     };
-  }, [bridge, color, lensHeight, lensWidth, temple]);
+  }, [bridge, color, lensHeight, lensWidth, modelUrl, temple]);
 
   const stopCamera = useCallback(() => {
     cancelAnimationFrame(trackingAnimationRef.current);
@@ -303,7 +332,7 @@ export function VirtualTryOn({ lensWidth, lensHeight, bridge, temple, color }: V
       <div className="grid gap-3 sm:grid-cols-3">
         <StatusCard icon={<ShieldCheck />} label="Xử lý riêng tư" value="Trên thiết bị" ready />
         <StatusCard icon={<ScanFace />} label="Face landmarks" value={tracking === "tracking" ? "Đã khóa khuôn mặt" : "Chờ khuôn mặt"} ready={tracking === "tracking"} />
-        <StatusCard icon={<Check />} label="Tài sản kính" value={`${lensWidth}-${bridge}-${temple} · GLB ready`} ready />
+        <StatusCard icon={<Check />} label="Tài sản kính" value={modelUrl ? "AI Scan GLB" : `${lensWidth}-${bridge}-${temple} · Parametric`} ready />
       </div>
     </div>
   );

@@ -99,7 +99,7 @@ export default function ThreeDStudio() {
           <div className="hidden items-center gap-2 text-sm text-[#91a79d] md:flex">
             <span className="text-[#dcebe4]">Tạo kính 3D</span><ChevronRight className="size-4" /><span>Thử kính</span><ChevronRight className="size-4" /><span>Đo PD</span><ChevronRight className="size-4" /><span>Đo tròng</span>
           </div>
-          <a href="/lensmeter" className="rounded-lg border border-white/12 bg-white/5 px-3 py-2 text-sm text-[#b7c7bf] transition hover:bg-white/10 hover:text-white">Mô-đun OptiAxis</a>
+          <div className="flex items-center gap-2"><a href="/scan-3d" className="rounded-lg border border-[#63dbc0]/20 bg-[#63dbc0]/8 px-3 py-2 text-sm text-[#9be5d4] transition hover:bg-[#63dbc0]/14">AI Scan 3D</a><a href="/lensmeter" className="rounded-lg border border-white/12 bg-white/5 px-3 py-2 text-sm text-[#b7c7bf] transition hover:bg-white/10 hover:text-white">Mô-đun OptiAxis</a></div>
         </div>
       </header>
 
