@@ -37,7 +37,6 @@ export default function ThreeDStudio() {
 
   const totalWidth = useMemo(() => lensWidth * 2 + bridge + 12, [lensWidth, bridge]);
   const qualityAverage = photos.length ? Math.round(photos.reduce((sum, photo) => sum + photo.score, 0) / photos.length) : 0;
-  const completeness = Math.min(100, Math.round((photos.length / angleNames.length) * 70 + 30));
   const goodPhotos = photos.filter((photo) => photo.score >= 65).length;
 
   async function receivePhotos(event: ChangeEvent<HTMLInputElement>) {
@@ -110,7 +109,7 @@ export default function ThreeDStudio() {
             <p className="mb-4 text-xs font-semibold tracking-[.16em] text-[#63dbc0]">QUY TRÌNH DỰ ÁN</p>
             <ol className="space-y-2">
               <Stage icon={<Box />} title="Kính 3D" detail="Đang thực hiện" active />
-              <Stage icon={<ScanFace />} title="Virtual try-on" detail="Bước 2" />
+              <Stage icon={<ScanFace />} title="Virtual try-on" detail="Bước 2" href="/try-on" />
               <Stage icon={<Eye />} title="Khoảng cách đồng tử" detail="Bước 3" />
               <Stage icon={<Aperture />} title="SPH / CYL / AXIS" detail="Bước 4" href="/lensmeter" />
             </ol>
