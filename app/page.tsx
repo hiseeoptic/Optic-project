@@ -99,7 +99,7 @@ export default function ThreeDStudio() {
           <div className="hidden items-center gap-2 text-sm text-[#91a79d] md:flex">
             <span className="text-[#dcebe4]">Tạo kính 3D</span><ChevronRight className="size-4" /><span>Thử kính</span><ChevronRight className="size-4" /><span>Đo PD</span><ChevronRight className="size-4" /><span>Đo tròng</span>
           </div>
-          <div className="flex items-center gap-2"><a href="/scan-3d" className="rounded-lg border border-[#63dbc0]/20 bg-[#63dbc0]/8 px-3 py-2 text-sm text-[#9be5d4] transition hover:bg-[#63dbc0]/14">AI Scan 3D</a><a href="/lensmeter" className="rounded-lg border border-white/12 bg-white/5 px-3 py-2 text-sm text-[#b7c7bf] transition hover:bg-white/10 hover:text-white">Mô-đun OptiAxis</a></div>
+          <div className="flex items-center gap-2"><a href="/pd-scan" className="rounded-lg bg-[#bdfc6a] px-3 py-2 text-sm font-medium text-[#07110f] transition hover:bg-[#d0ff91]">Đo đồng tử</a><a href="/scan-3d" className="hidden rounded-lg border border-[#63dbc0]/20 bg-[#63dbc0]/8 px-3 py-2 text-sm text-[#9be5d4] transition hover:bg-[#63dbc0]/14 sm:block">AI Scan 3D</a><a href="/lensmeter" className="hidden rounded-lg border border-white/12 bg-white/5 px-3 py-2 text-sm text-[#b7c7bf] transition hover:bg-white/10 hover:text-white lg:block">Mô-đun OptiAxis</a></div>
         </div>
       </header>
 
@@ -110,7 +110,7 @@ export default function ThreeDStudio() {
             <ol className="space-y-2">
               <Stage icon={<Box />} title="Kính 3D" detail="Đang thực hiện" active />
               <Stage icon={<ScanFace />} title="Virtual try-on" detail="Bước 2" href="/try-on" />
-              <Stage icon={<Eye />} title="Khoảng cách đồng tử" detail="Bước 3" />
+              <Stage icon={<Eye />} title="Khoảng cách đồng tử" detail="Đo trực tiếp" href="/pd-scan" />
               <Stage icon={<Aperture />} title="SPH / CYL / AXIS" detail="Bước 4" href="/lensmeter" />
             </ol>
           </section>
