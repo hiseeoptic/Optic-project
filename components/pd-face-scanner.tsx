@@ -13,7 +13,6 @@ type Reading = { pd: number; leftPd: number; rightPd: number; faceWidth: number;
 type Glint = { point: Point; quality: number } | null;
 
 const EMPTY_READING: Reading = { pd: 0, leftPd: 0, rightPd: 0, faceWidth: 0, confidence: 0, roll: 0, yaw: 0, reflection: 0, usesGlint: false };
-const IRIS_DIAMETER_MM = 11.7;
 const CARD_WIDTH_MM = 85.6;
 
 export function PdFaceScanner() {
@@ -27,6 +26,8 @@ export function PdFaceScanner() {
   const lastVideoTimeRef = useRef(-1);
   const facingModeRef = useRef<FacingMode>("user");
   const smoothRef = useRef<Reading>(EMPTY_READING);
+  const glintStreakRef = useRef(0);
+  const pdPixelsRef = useRef(0);
   const [tracking, setTracking] = useState<TrackingState>("idle");
   const [facingMode, setFacingMode] = useState<FacingMode>("user");
   const [reading, setReading] = useState<Reading>(EMPTY_READING);
@@ -34,6 +35,7 @@ export function PdFaceScanner() {
   const [manualScale, setManualScale] = useState<number | null>(null);
   const [calibrating, setCalibrating] = useState(false);
   const [calibrationPoints, setCalibrationPoints] = useState<Point[]>([]);
+  const [calibrationError, setCalibrationError] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   const clearCanvas = useCallback(() => {
@@ -106,31 +108,43 @@ export function PdFaceScanner() {
     const glintB = rawGlintB ? { ...rawGlintB, point: videoToDisplay(rawGlintB.point) } : null;
     const leftGlint = pupilA.x < pupilB.x ? glintA : glintB;
     const rightGlint = pupilA.x < pupilB.x ? glintB : glintA;
-    const usesGlint = Boolean(leftGlint && rightGlint && leftGlint.quality >= 0.48 && rightGlint.quality >= 0.48);
-    const leftMarker = usesGlint ? leftGlint!.point : left;
-    const rightMarker = usesGlint ? rightGlint!.point : right;
     const irisOne = maxDiameter([469, 470, 471, 472]);
     const irisTwo = maxDiameter([474, 475, 476, 477]);
     const irisPx = (irisOne + irisTwo) / 2;
     if (irisPx < 2) return;
-    const mmPerPixel = manualScale ?? IRIS_DIAMETER_MM / irisPx;
+    const offsetSimilarity = leftGlint && rightGlint
+      ? Math.hypot((leftGlint.point.x - left.x) / irisOne - (rightGlint.point.x - right.x) / irisTwo, (leftGlint.point.y - left.y) / irisOne - (rightGlint.point.y - right.y) / irisTwo)
+      : Number.POSITIVE_INFINITY;
+    const glintCandidate = Boolean(leftGlint && rightGlint && leftGlint.quality >= 0.55 && rightGlint.quality >= 0.55 && offsetSimilarity < 0.55);
+    glintStreakRef.current = glintCandidate ? Math.min(20, glintStreakRef.current + 1) : Math.max(0, glintStreakRef.current - 2);
+    const usesGlint = glintCandidate && glintStreakRef.current >= 10;
+    const leftMarker = usesGlint ? leftGlint!.point : left;
+    const rightMarker = usesGlint ? rightGlint!.point : right;
     const nose = point(168);
     const templeA = point(127);
     const templeB = point(356);
     const templeLeft = templeA.x < templeB.x ? templeA : templeB;
     const templeRight = templeA.x < templeB.x ? templeB : templeA;
     const pdPx = distance(leftMarker, rightMarker);
+    if (glintCandidate) pdPixelsRef.current = distance(leftGlint!.point, rightGlint!.point);
+    else if (!pdPixelsRef.current) pdPixelsRef.current = distance(left, right);
     const roll = Math.abs(Math.atan2(right.y - left.y, right.x - left.x) * 180 / Math.PI);
-    const leftNosePx = distance(leftMarker, nose);
-    const rightNosePx = distance(rightMarker, nose);
+    const axisX = (rightMarker.x - leftMarker.x) / Math.max(pdPx, 1);
+    const axisY = (rightMarker.y - leftMarker.y) / Math.max(pdPx, 1);
+    const noseProjection = (nose.x - leftMarker.x) * axisX + (nose.y - leftMarker.y) * axisY;
+    const leftNosePx = Math.max(0, Math.min(pdPx, noseProjection));
+    const rightNosePx = pdPx - leftNosePx;
     const yaw = Math.abs(leftNosePx - rightNosePx) / Math.max(pdPx, 1);
     const irisSymmetry = Math.min(irisOne, irisTwo) / Math.max(irisOne, irisTwo);
     const reflection = ((leftGlint?.quality ?? 0) + (rightGlint?.quality ?? 0)) * 50;
     const rawConfidence = Math.max(0, Math.min(100, 100 - roll * 5.5 - yaw * 160 - Math.max(0, 8 - irisPx) * 5 - (1 - irisSymmetry) * 45));
-    const confidence = Math.round(Math.min(rawConfidence, usesGlint ? (manualScale ? 100 : 78) : 52));
-    const next: Reading = { pd: pdPx * mmPerPixel, leftPd: leftNosePx * mmPerPixel, rightPd: rightNosePx * mmPerPixel, faceWidth: distance(templeLeft, templeRight) * mmPerPixel, confidence, roll, yaw, reflection, usesGlint };
+    const measuredPd = manualScale ? pdPx * manualScale : 0;
+    const measuredFaceWidth = manualScale ? distance(templeLeft, templeRight) * manualScale : 0;
+    const plausible = Boolean(manualScale && measuredPd >= 45 && measuredPd <= 80 && measuredFaceWidth >= 95 && measuredFaceWidth <= 190);
+    const confidence = Math.round(plausible ? Math.min(rawConfidence, usesGlint ? 100 : 45) : 0);
+    const next: Reading = { pd: plausible ? measuredPd : 0, leftPd: plausible ? leftNosePx * manualScale! : 0, rightPd: plausible ? rightNosePx * manualScale! : 0, faceWidth: plausible ? measuredFaceWidth : 0, confidence, roll, yaw, reflection, usesGlint };
     const previous = smoothRef.current;
-    const alpha = previous.pd ? 0.18 : 1;
+    const alpha = previous.pd && next.pd ? 0.18 : 1;
     const smooth = { pd: lerp(previous.pd, next.pd, alpha), leftPd: lerp(previous.leftPd, next.leftPd, alpha), rightPd: lerp(previous.rightPd, next.rightPd, alpha), faceWidth: lerp(previous.faceWidth, next.faceWidth, alpha), confidence: lerp(previous.confidence, next.confidence, 0.25), roll: lerp(previous.roll, next.roll, 0.25), yaw: lerp(previous.yaw, next.yaw, 0.25), reflection: lerp(previous.reflection, next.reflection, 0.25), usesGlint };
     smoothRef.current = smooth;
     setReading(smooth);
@@ -156,6 +170,12 @@ export function PdFaceScanner() {
     stopCamera();
     setErrorMessage("");
     setCaptured(null);
+    setManualScale(null);
+    setCalibrationPoints([]);
+    setCalibrating(false);
+    setCalibrationError("");
+    glintStreakRef.current = 0;
+    pdPixelsRef.current = 0;
     smoothRef.current = EMPTY_READING;
     setReading(EMPTY_READING);
     setTracking("loading");
@@ -197,22 +217,45 @@ export function PdFaceScanner() {
     const next = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     if (!calibrationPoints.length) {
       setCalibrationPoints([next]);
+      const ctx = event.currentTarget.getContext("2d");
+      if (ctx) drawCalibration(ctx, [next], true);
       return;
     }
     const pixels = Math.hypot(next.x - calibrationPoints[0].x, next.y - calibrationPoints[0].y);
-    if (pixels < 40) return;
+    const angle = Math.abs(Math.atan2(next.y - calibrationPoints[0].y, next.x - calibrationPoints[0].x) * 180 / Math.PI);
+    const horizontalAngle = Math.min(angle, Math.abs(180 - angle));
+    const candidateScale = CARD_WIDTH_MM / Math.max(pixels, 1);
+    const candidatePd = pdPixelsRef.current * candidateScale;
+    if (pixels < rect.width * 0.22 || horizontalAngle > 10 || candidatePd < 45 || candidatePd > 80) {
+      setCalibrationPoints([calibrationPoints[0]]);
+      setCalibrationError(horizontalAngle > 10 ? "Hai mép thẻ phải nằm gần như cùng một đường ngang. Hãy chạm lại." : "Khoảng đánh dấu không hợp lệ và có thể tạo sai số lớn. Hãy giữ thẻ sát trán rồi chạm đúng hai mép ngoài.");
+      return;
+    }
     setCalibrationPoints([calibrationPoints[0], next]);
-    setManualScale(CARD_WIDTH_MM / pixels);
+    const ctx = event.currentTarget.getContext("2d");
+    if (ctx) drawCalibration(ctx, [calibrationPoints[0], next], false);
+    setManualScale(candidateScale);
     setCalibrating(false);
+    setCalibrationError("");
     setCaptured(null);
     smoothRef.current = EMPTY_READING;
+    void videoRef.current?.play();
   }
 
   function beginCardCalibration() {
     setCalibrationPoints([]);
     setManualScale(null);
     setCaptured(null);
+    setCalibrationError("");
     setCalibrating(true);
+    videoRef.current?.pause();
+  }
+
+  function cancelCardCalibration() {
+    setCalibrationPoints([]);
+    setCalibrating(false);
+    setCalibrationError("");
+    void videoRef.current?.play();
   }
 
   const isActive = tracking === "loading" || tracking === "searching" || tracking === "tracking";
@@ -228,6 +271,7 @@ export function PdFaceScanner() {
           {!isActive && <div className="absolute inset-0 grid place-items-center bg-[radial-gradient(circle_at_center,rgba(99,219,192,.12),transparent_58%)]"><div className="max-w-sm px-6 text-center"><div className="mx-auto grid size-24 place-items-center rounded-full border border-dashed border-[#63dbc0]/35 bg-[#63dbc0]/7"><Crosshair className="size-11 text-[#63dbc0]" /></div><p className="mt-5 text-lg font-medium text-white">Quét tâm đồng tử trực tiếp</p><p className="mt-2 text-sm leading-6 text-[#7f958b]">Nhìn thẳng vào camera, tháo kính và giữ ánh sáng đều hai bên mắt.</p></div></div>}
           {isActive && tracking !== "tracking" && <div className="pointer-events-none absolute inset-0 grid place-items-center"><div className="h-[72%] w-[52%] rounded-[48%] border-2 border-dashed border-[#bdfc6a]/50" /></div>}
           {isActive && <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/80 bg-white px-3 py-1.5 text-[10px] font-semibold text-[#07110f] shadow-[0_0_30px_rgba(255,255,255,.8)]"><span className="size-2.5 animate-pulse rounded-full bg-white ring-2 ring-[#07110f]" /> Nhìn vào chấm sáng</div>}
+          {calibrating && <div className="pointer-events-none absolute inset-x-4 top-16 z-30 mx-auto max-w-lg rounded-2xl border border-white/20 bg-[#07110f]/92 p-3 text-center text-sm text-white shadow-2xl backdrop-blur-xl">Khung hình đã được đóng băng · {calibrationPoints.length ? "Chạm mép ngoài thứ hai của thẻ" : "Chạm mép ngoài thứ nhất của thẻ"}</div>}
           <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/10 bg-[#07110f]/82 px-3 py-2 text-xs backdrop-blur-xl"><span className={`size-2 rounded-full ${tracking === "tracking" ? "bg-[#bdfc6a]" : tracking === "error" ? "bg-rose-400" : "bg-amber-300"}`} /><span>{trackingLabel(tracking)}</span>{tracking === "tracking" && <span className="text-[#71877d]">· {Math.round(reading.confidence)}%</span>}</div>
           {captured && <div className="absolute right-4 top-4 rounded-full border border-[#bdfc6a]/20 bg-[#bdfc6a]/12 px-3 py-2 text-xs text-[#d7ff9f] backdrop-blur-xl"><Check className="mr-1 inline size-3.5" /> Đã giữ kết quả</div>}
           <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-2xl border border-white/10 bg-[#07110f]/86 p-2 backdrop-blur-xl">
@@ -239,8 +283,8 @@ export function PdFaceScanner() {
       </section>
 
       <aside className="space-y-4">
-        <section className="rounded-3xl border border-white/10 bg-[#0b1815] p-5"><div className="flex items-center justify-between"><p className="text-xs font-semibold tracking-[.16em] text-[#63dbc0]">PCCR · KẾT QUẢ</p><span className={`rounded-full px-2 py-1 text-[10px] ${display.usesGlint ? "bg-[#bdfc6a]/10 text-[#cfff91]" : "bg-amber-300/10 text-amber-200"}`}>{display.usesGlint ? "Mốc phản xạ giác mạc" : "Mốc mống mắt tạm thời"}</span></div><div className="mt-5 rounded-2xl border border-[#bdfc6a]/15 bg-[#bdfc6a]/6 p-5"><p className="text-sm text-[#91a79d]">Khoảng cách phản xạ giác mạc</p><p className="mt-2 text-5xl font-semibold tracking-[-.05em] text-white">{format(display.pd)}<span className="ml-2 text-lg text-[#91a79d]">mm</span></p><div className="mt-4 grid grid-cols-2 gap-2"><SmallMetric label="PD trái" value={format(display.leftPd)} /><SmallMetric label="PD phải" value={format(display.rightPd)} /></div></div><div className="mt-3 rounded-2xl border border-white/8 bg-black/15 p-4"><p className="text-sm text-[#91a79d]">Rộng mặt tại cao độ vành tai</p><p className="mt-1 text-3xl font-semibold text-white">{format(display.faceWidth)} <span className="text-base font-normal text-[#71877d]">mm</span></p><p className="mt-2 text-xs leading-5 text-[#63786f]">Ước lượng qua hai điểm thái dương gần vành tai; camera chính diện không nhìn được mép ngoài của tai.</p></div>{captured && <Button onClick={() => setCaptured(null)} variant="outline" className="mt-3 w-full border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white"><RotateCcw /> Đo lại</Button>}</section>
-        <section className="rounded-2xl border border-white/10 bg-[#0b1815] p-4"><div className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#63dbc0]/10 text-[#63dbc0]"><CreditCard className="size-5" /></span><div><p className="text-sm font-medium text-white">Hiệu chuẩn thẻ 85,60 mm</p><p className="mt-1 text-xs leading-5 text-[#70857c]">Áp thẻ ngân hàng ngang lên trán, cùng mặt phẳng với mắt. Bấm bắt đầu rồi chạm chính xác hai mép trái–phải của thẻ trên hình.</p></div></div><Button onClick={beginCardCalibration} disabled={!isActive || tracking !== "tracking"} variant="outline" className="mt-4 w-full border-[#63dbc0]/20 bg-[#63dbc0]/7 text-[#a9e4d6] hover:bg-[#63dbc0]/12 hover:text-white"><Crosshair /> {calibrating ? calibrationPoints.length ? "Chạm mép thứ hai" : "Chạm mép thứ nhất" : manualScale ? "Hiệu chuẩn lại" : "Bắt đầu hiệu chuẩn"}</Button>{manualScale && <div className="mt-3 flex items-center justify-between rounded-xl bg-[#bdfc6a]/7 px-3 py-2 text-xs"><span className="text-[#91a79d]">Tỷ lệ đã khóa</span><span className="font-medium text-[#cfff91]">{manualScale.toFixed(4)} mm/px</span></div>}</section>
+        <section className="rounded-3xl border border-white/10 bg-[#0b1815] p-5"><div className="flex items-center justify-between"><p className="text-xs font-semibold tracking-[.16em] text-[#63dbc0]">PCCR · KẾT QUẢ</p><span className={`rounded-full px-2 py-1 text-[10px] ${display.pd ? "bg-[#bdfc6a]/10 text-[#cfff91]" : "bg-amber-300/10 text-amber-200"}`}>{display.pd ? "Đã kiểm tra hợp lệ" : "Chưa có số đo hợp lệ"}</span></div><div className="mt-5 rounded-2xl border border-[#bdfc6a]/15 bg-[#bdfc6a]/6 p-5"><p className="text-sm text-[#91a79d]">Khoảng cách phản xạ giác mạc</p><p className="mt-2 text-5xl font-semibold tracking-[-.05em] text-white">{format(display.pd)}<span className="ml-2 text-lg text-[#91a79d]">mm</span></p><div className="mt-4 grid grid-cols-2 gap-2"><SmallMetric label="PD trái" value={format(display.leftPd)} /><SmallMetric label="PD phải" value={format(display.rightPd)} /></div>{!display.pd && <p className="mt-4 text-xs leading-5 text-amber-100/65">Không hiển thị mm cho đến khi phản xạ ổn định và phép hiệu chuẩn thẻ vượt kiểm tra hình học.</p>}</div><div className="mt-3 rounded-2xl border border-white/8 bg-black/15 p-4"><p className="text-sm text-[#91a79d]">Rộng mặt tại cao độ vành tai</p><p className="mt-1 text-3xl font-semibold text-white">{format(display.faceWidth)} <span className="text-base font-normal text-[#71877d]">mm</span></p><p className="mt-2 text-xs leading-5 text-[#63786f]">Ước lượng qua hai điểm thái dương gần vành tai; camera chính diện không nhìn được mép ngoài của tai.</p></div>{captured && <Button onClick={() => setCaptured(null)} variant="outline" className="mt-3 w-full border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white"><RotateCcw /> Đo lại</Button>}</section>
+        <section className="rounded-2xl border border-white/10 bg-[#0b1815] p-4"><div className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#63dbc0]/10 text-[#63dbc0]"><CreditCard className="size-5" /></span><div><p className="text-sm font-medium text-white">Hiệu chuẩn thẻ 85,60 mm</p><p className="mt-1 text-xs leading-5 text-[#70857c]">Giữ thẻ ngang sát trán trước khi bấm. Hệ thống sẽ đóng băng hình để hai lần chạm không bị lệch do chuyển động.</p></div></div><Button onClick={calibrating ? cancelCardCalibration : beginCardCalibration} disabled={!calibrating && (!isActive || tracking !== "tracking" || !reading.usesGlint)} variant="outline" className="mt-4 w-full border-[#63dbc0]/20 bg-[#63dbc0]/7 text-[#a9e4d6] hover:bg-[#63dbc0]/12 hover:text-white"><Crosshair /> {calibrating ? "Hủy hiệu chuẩn" : manualScale ? "Hiệu chuẩn lại" : "Đóng băng & hiệu chuẩn"}</Button>{calibrationError && <p className="mt-3 rounded-xl border border-rose-400/15 bg-rose-400/7 p-3 text-xs leading-5 text-rose-200">{calibrationError}</p>}{manualScale && <div className="mt-3 flex items-center justify-between rounded-xl bg-[#bdfc6a]/7 px-3 py-2 text-xs"><span className="text-[#91a79d]">Tỷ lệ đã khóa</span><span className="font-medium text-[#cfff91]">{manualScale.toFixed(4)} mm/px</span></div>}</section>
         <section className="rounded-2xl border border-amber-300/12 bg-amber-300/5 p-4 text-xs leading-5 text-amber-100/70">Kết quả từ webcam là ước lượng phục vụ chọn gọng. Đơn kính, lắp tròng hoặc quyết định lâm sàng cần được đo lại bằng pupillometer tại cơ sở nhãn khoa.</section>
       </aside>
     </div>
@@ -302,7 +346,7 @@ function drawMeasurement(ctx: CanvasRenderingContext2D, left: Point, right: Poin
   ctx.beginPath(); ctx.moveTo(left.x, left.y); ctx.lineTo(right.x, right.y); ctx.stroke();
   [left, right].forEach((pupil) => { ctx.beginPath(); ctx.arc(pupil.x, pupil.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(pupil.x, pupil.y, 13, 0, Math.PI * 2); ctx.stroke(); });
   ctx.beginPath(); ctx.moveTo(nose.x, nose.y - 8); ctx.lineTo(nose.x, nose.y + 8); ctx.stroke();
-  label(ctx, `${reading.pd.toFixed(1)} mm ${reading.usesGlint ? "CR-PD" : "ước lượng"}`, (left.x + right.x) / 2, Math.min(left.y, right.y) - 28, width);
+  label(ctx, reading.pd ? `${reading.pd.toFixed(1)} mm CR-PD` : "Chưa có tỷ lệ mm hợp lệ", (left.x + right.x) / 2, Math.min(left.y, right.y) - 28, width);
   ctx.shadowColor = "rgba(99,219,192,.5)"; ctx.strokeStyle = "#63dbc0"; ctx.fillStyle = "#63dbc0"; ctx.setLineDash([6, 5]);
   ctx.beginPath(); ctx.moveTo(templeLeft.x, templeLeft.y); ctx.lineTo(templeRight.x, templeRight.y); ctx.stroke(); ctx.setLineDash([]);
   [templeLeft, templeRight].forEach((temple) => { ctx.beginPath(); ctx.arc(temple.x, temple.y, 5, 0, Math.PI * 2); ctx.fill(); });
@@ -326,6 +370,6 @@ function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number
 function lerp(from: number, to: number, amount: number) { return from + (to - from) * amount; }
 function format(value: number) { return value > 0 ? value.toFixed(1) : "—"; }
 function trackingLabel(state: TrackingState) { if (state === "loading") return "Đang tải AI mắt"; if (state === "searching") return "Đang tìm khuôn mặt"; if (state === "tracking") return "Đang đo trực tiếp"; if (state === "error") return "Camera chưa sẵn sàng"; return "Camera đang tắt"; }
-function poseLabel(reading: Reading) { if (!reading.pd) return "Chờ khuôn mặt"; if (reading.roll > 3) return "Giữ đầu ngang"; if (reading.yaw > 0.08) return "Nhìn thẳng hơn"; return "Đạt chuẩn đo"; }
+function poseLabel(reading: Reading) { if (!reading.reflection) return "Chờ khuôn mặt"; if (reading.roll > 3) return "Giữ đầu ngang"; if (reading.yaw > 0.08) return "Nhìn thẳng hơn"; return "Đạt chuẩn đo"; }
 function SmallMetric({ label, value }: { label: string; value: string }) { return <div className="rounded-xl bg-black/15 p-3"><span className="block text-xs text-[#70857c]">{label}</span><span className="mt-1 block text-lg font-medium text-white">{value} mm</span></div>; }
 function StatusCard({ icon, label, value, ready }: { icon: React.ReactNode; label: string; value: string; ready?: boolean }) { return <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#0b1815] p-4"><span className={`grid size-9 shrink-0 place-items-center rounded-lg ${ready ? "bg-[#bdfc6a]/10 text-[#bdfc6a]" : "bg-white/5 text-[#70857c]"}`}>{icon}</span><span><span className="block text-xs text-[#70857c]">{label}</span><span className="mt-1 block text-sm text-white">{value}</span></span></div>; }
