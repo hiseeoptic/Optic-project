@@ -11,6 +11,9 @@ import { Progress } from "@/components/ui/progress";
 const views = ["Chính diện", "Bên trái", "Bên phải", "Mặt sau"];
 type Photo = { name: string; preview: string; data: string; width: number; height: number };
 type JobState = "idle" | "submitting" | "processing" | "ready" | "error";
+type ConfigureResponse = { configured?: boolean };
+type CreateResponse = { taskId?: string; error?: string };
+type PollResponse = { status?: string; progress?: number; modelUrl?: string; error?: string };
 
 export default function Scan3DPage() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -23,7 +26,7 @@ export default function Scan3DPage() {
   const [modelUrl, setModelUrl] = useState("");
 
   useEffect(() => {
-    fetch("/api/reconstruct").then((response) => response.json()).then((data) => setConfigured(Boolean(data.configured))).catch(() => setConfigured(false));
+    fetch("/api/reconstruct").then((response) => response.json() as Promise<ConfigureResponse>).then((data) => setConfigured(Boolean(data.configured))).catch(() => setConfigured(false));
     return () => photosRef.current.forEach((photo) => URL.revokeObjectURL(photo.preview));
   }, []);
 
@@ -46,8 +49,9 @@ export default function Scan3DPage() {
     setMessage("Đang gửi bốn góc kính sang AI reconstruction…");
     try {
       const response = await fetch("/api/reconstruct", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ images: photos.map((photo) => photo.data) }) });
-      const body = await response.json();
+      const body = await response.json() as CreateResponse;
       if (!response.ok) throw new Error(body.error || "Không thể tạo tác vụ 3D.");
+      if (!body.taskId) throw new Error("Máy chủ không trả về mã tác vụ 3D.");
       setJobState("processing");
       await pollTask(body.taskId);
     } catch (error) {
@@ -59,7 +63,7 @@ export default function Scan3DPage() {
   async function pollTask(taskId: string) {
     for (let attempt = 0; attempt < 120; attempt++) {
       const response = await fetch(`/api/reconstruct?taskId=${encodeURIComponent(taskId)}`, { cache: "no-store" });
-      const body = await response.json();
+      const body = await response.json() as PollResponse;
       if (!response.ok) throw new Error(body.error || "Không thể đọc tiến độ AI.");
       setProgress(body.progress ?? 0);
       setMessage(body.status === "PENDING" ? "Tác vụ đang chờ GPU…" : `AI đang dựng hình học và texture PBR · ${body.progress ?? 0}%`);
@@ -72,7 +76,7 @@ export default function Scan3DPage() {
         localStorage.setItem("kinh3d.aiModelCreatedAt", new Date().toISOString());
         return;
       }
-      if (["FAILED", "CANCELED"].includes(body.status)) throw new Error(body.error || "AI không thể tái tạo mô hình từ bộ ảnh này.");
+      if (body.status && ["FAILED", "CANCELED"].includes(body.status)) throw new Error(body.error || "AI không thể tái tạo mô hình từ bộ ảnh này.");
       await new Promise((resolve) => window.setTimeout(resolve, 5000));
     }
     throw new Error("Tác vụ mất quá nhiều thời gian. Bạn có thể thử lại sau.");

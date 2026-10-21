@@ -1,5 +1,18 @@
 const MESHY_ENDPOINT = "https://api.meshy.ai/openapi/v1/multi-image-to-3d";
 
+type MeshyTaskResponse = {
+  id?: string;
+  status?: string;
+  progress?: number;
+  model_urls?: { glb?: string };
+  thumbnail_url?: string;
+  thumbnail_urls?: string[];
+  task_error?: { message?: string };
+  message?: string;
+};
+
+type MeshyCreateResponse = { result?: string; message?: string };
+
 function json(data: unknown, status = 200) {
   return Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
 }
@@ -18,7 +31,7 @@ export async function GET(request: Request) {
   const response = await fetch(`${MESHY_ENDPOINT}/${taskId}`, {
     headers: { Authorization: `Bearer ${key}` },
   });
-  const body = await response.json().catch(() => ({ message: "Meshy không trả về JSON hợp lệ." }));
+  const body = await response.json().catch(() => ({ message: "Meshy không trả về JSON hợp lệ." })) as MeshyTaskResponse;
   if (!response.ok) return json({ error: body?.message ?? "Không thể đọc trạng thái tác vụ 3D." }, response.status);
   return json({
     id: body.id,
@@ -57,7 +70,8 @@ export async function POST(request: Request) {
       multi_view_thumbnails: true,
     }),
   });
-  const result = await response.json().catch(() => ({ message: "Meshy không trả về JSON hợp lệ." }));
+  const result = await response.json().catch(() => ({ message: "Meshy không trả về JSON hợp lệ." })) as MeshyCreateResponse;
   if (!response.ok) return json({ error: result?.message ?? "Không thể tạo tác vụ AI 3D." }, response.status);
+  if (!result.result) return json({ error: "Meshy không trả về mã tác vụ 3D." }, 502);
   return json({ taskId: result.result });
 }
