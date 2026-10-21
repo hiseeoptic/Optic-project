@@ -19,6 +19,8 @@ import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type CaptureKind = "reference" | "lens";
+type GridMetrics = { points: number; spacingA: number; spacingB: number; angle: number; consistency: number };
+type GridAnalysis = { ratioA: number; ratioB: number; angle: number; quality: number; referencePoints: number; lensPoints: number };
 
 const steps = [
   { n: "01", label: "Thiết lập", detail: "Cố định hình học" },
@@ -40,6 +42,8 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const referenceDataRef = useRef<ImageData | null>(null);
+  const lensDataRef = useRef<ImageData | null>(null);
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [referenceImage, setReferenceImage] = useState("");
@@ -49,6 +53,8 @@ export default function Home() {
   const [principalAngle, setPrincipalAngle] = useState(90);
   const [calibration, setCalibration] = useState(25);
   const [analyzed, setAnalyzed] = useState(false);
+  const [analysisQuality, setAnalysisQuality] = useState(0);
+  const [analysisMessage, setAnalysisMessage] = useState("Chụp đủ hai ảnh để tự động tìm lưới.");
 
   const measurement = useMemo(() => {
     const pA = quarter((ratioA - 1) * calibration);
@@ -57,9 +63,9 @@ export default function Home() {
     const cylinder = Math.min(pA, pB) - sphere;
     const axis = pA >= pB ? principalAngle : (principalAngle + 90) % 180 || 180;
     const anisotropy = Math.abs(ratioA - ratioB);
-    const quality = Math.max(52, Math.min(94, 92 - anisotropy * 220));
+    const quality = analysisQuality || Math.max(52, Math.min(94, 92 - anisotropy * 220));
     return { sphere, cylinder, axis, quality };
-  }, [ratioA, ratioB, principalAngle, calibration]);
+  }, [ratioA, ratioB, principalAngle, calibration, analysisQuality]);
 
   const progress = referenceImage ? (lensImage ? (analyzed ? 100 : 75) : 50) : 25;
 
@@ -99,10 +105,21 @@ export default function Home() {
     const scale = Math.min(1, maxWidth / video.videoWidth);
     canvas.width = Math.round(video.videoWidth * scale);
     canvas.height = Math.round(video.videoHeight * scale);
-    canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const image = canvas.toDataURL("image/jpeg", 0.88);
-    if (kind === "reference") setReferenceImage(image);
-    else setLensImage(image);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+    if (kind === "reference") {
+      referenceDataRef.current = pixels;
+      setReferenceImage(image);
+      setAnalysisMessage("Đã khóa ảnh lưới nền. Giữ nguyên camera và đặt tròng vào tâm.");
+    } else {
+      lensDataRef.current = pixels;
+      setLensImage(image);
+      setAnalysisMessage("Đã chụp qua tròng. Sẵn sàng nhận diện chấm tự động.");
+    }
+    setAnalysisQuality(0);
     setAnalyzed(false);
   }
 
@@ -113,12 +130,43 @@ export default function Home() {
     setRatioB(0.92);
     setPrincipalAngle(90);
     setCalibration(25);
+    referenceDataRef.current = null;
+    lensDataRef.current = null;
+    setAnalysisQuality(88);
+    setAnalysisMessage("Dữ liệu mẫu: 48 chấm nền và 47 chấm qua tròng đã được ghép.");
     setAnalyzed(false);
+  }
+
+  function analyzeMeasurement() {
+    if (referenceImage === "sample-reference" && lensImage === "sample-lens") {
+      setAnalyzed(true);
+      return;
+    }
+    const reference = referenceDataRef.current;
+    const lens = lensDataRef.current;
+    if (!reference || !lens) return;
+    try {
+      const result = analyzeGridPair(reference, lens);
+      setRatioA(result.ratioA);
+      setRatioB(result.ratioB);
+      setPrincipalAngle(result.angle);
+      setAnalysisQuality(result.quality);
+      setAnalysisMessage(`Đã ghép ${result.referencePoints} chấm nền với ${result.lensPoints} chấm qua tròng.`);
+      setAnalyzed(true);
+    } catch (error) {
+      setAnalyzed(false);
+      setAnalysisQuality(0);
+      setAnalysisMessage(error instanceof Error ? error.message : "Không thể nhận diện lưới. Hãy chụp lại với ánh sáng đều.");
+    }
   }
 
   function reset() {
     setReferenceImage("");
     setLensImage("");
+    referenceDataRef.current = null;
+    lensDataRef.current = null;
+    setAnalysisQuality(0);
+    setAnalysisMessage("Chụp đủ hai ảnh để tự động tìm lưới.");
     setAnalyzed(false);
   }
 
@@ -232,13 +280,14 @@ export default function Home() {
           <div className="rounded-2xl border border-white/10 bg-[#0b1815] p-5">
             <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold tracking-[0.16em] text-[#63dbc0]">PHÂN TÍCH THỬ</p><h2 className="mt-1 text-lg font-semibold text-white">Hai kinh tuyến chính</h2></div><span className="rounded-full bg-white/5 px-2.5 py-1 text-xs text-[#70857c]">minus cyl</span></div>
             <div className="mt-5 space-y-4"><NumberField label="Tỷ lệ kinh tuyến A" value={ratioA} step={0.001} onChange={setRatioA} /><NumberField label="Tỷ lệ kinh tuyến B" value={ratioB} step={0.001} onChange={setRatioB} /><NumberField label="Góc kinh tuyến A" value={principalAngle} step={1} suffix="°" onChange={setPrincipalAngle} /></div>
-            <Button disabled={!referenceImage || !lensImage} onClick={() => setAnalyzed(true)} className="mt-5 w-full bg-[#63dbc0] text-[#07110f] hover:bg-[#8ff0d9]"><Aperture /> Tính SPH / CYL / AXIS</Button>
+            <Button disabled={!referenceImage || !lensImage} onClick={analyzeMeasurement} className="mt-5 w-full bg-[#63dbc0] text-[#07110f] hover:bg-[#8ff0d9]"><Aperture /> Tự nhận lưới & tính độ</Button>
+            <p className="mt-3 text-xs leading-5 text-[#7f998e]">{analysisMessage}</p>
           </div>
 
           <div className={`rounded-2xl border p-5 transition-colors ${analyzed ? "border-[#bdfc6a]/30 bg-[#10251e]" : "border-white/10 bg-[#0b1815]"}`}>
             <div className="flex items-center justify-between"><p className="text-xs font-semibold tracking-[0.16em] text-[#91a79d]">KẾT QUẢ</p>{analyzed && <span className="rounded-full bg-[#bdfc6a]/12 px-2.5 py-1 text-xs text-[#bdfc6a]">Đã tính</span>}</div>
             <div className="mt-5 grid grid-cols-3 gap-2"><Result label="SPH" value={analyzed ? formatPower(measurement.sphere) : "—"} /><Result label="CYL" value={analyzed ? formatPower(measurement.cylinder) : "—"} /><Result label="AXIS" value={analyzed ? `${Math.round(measurement.axis)}°` : "—"} /></div>
-            <div className="mt-5 border-t border-white/10 pt-4"><div className="mb-2 flex justify-between text-xs"><span className="text-[#70857c]">Chất lượng tín hiệu</span><span className="text-[#dbe9e2]">{analyzed ? `${Math.round(measurement.quality)}%` : "Chưa có"}</span></div><Progress value={analyzed ? measurement.quality : 0} className="h-1.5 bg-white/10 [&>div]:bg-[#bdfc6a]" /><p className="mt-3 text-xs leading-5 text-[#63786f]">Kết quả hiện dùng dữ liệu tỷ lệ đã nhập. Bước kế tiếp sẽ tự tìm chấm từ ảnh và kiểm chứng bằng lensmeter chuẩn.</p></div>
+            <div className="mt-5 border-t border-white/10 pt-4"><div className="mb-2 flex justify-between text-xs"><span className="text-[#70857c]">Chất lượng nhận diện</span><span className="text-[#dbe9e2]">{analyzed ? `${Math.round(measurement.quality)}%` : "Chưa có"}</span></div><Progress value={analyzed ? measurement.quality : 0} className="h-1.5 bg-white/10 [&>div]:bg-[#bdfc6a]" /><p className="mt-3 text-xs leading-5 text-[#63786f]">Thuật toán tìm tâm chấm và so sánh khoảng cách theo hai kinh tuyến. Chỉ dùng kết quả khi bộ gá đã hiệu chuẩn bằng tròng chuẩn và chất lượng đạt tối thiểu 80%.</p></div>
           </div>
         </aside>
       </div>
@@ -266,4 +315,170 @@ function Result({ label, value }: { label: string; value: string }) {
 
 function DotGrid({ compact = false, large = false }: { compact?: boolean; large?: boolean }) {
   return <div aria-label="Lưới chấm hiệu chuẩn" className={`${large ? "h-[180mm] w-[180mm]" : compact ? "size-full" : "aspect-square w-full"} dot-grid rounded-xl border border-white/10 bg-[#eff8f2]`} />;
+}
+
+function analyzeGridPair(reference: ImageData, lens: ImageData): GridAnalysis {
+  const referenceGrid = extractGridMetrics(reference);
+  const lensGrid = extractGridMetrics(lens);
+  if (referenceGrid.points < 16 || lensGrid.points < 16) {
+    throw new Error(`Chưa thấy đủ chấm lưới (${referenceGrid.points}/${lensGrid.points}). Hãy tăng sáng, lấy nét và căn lưới phủ kín vòng tròn.`);
+  }
+  const ratioA = lensGrid.spacingA / referenceGrid.spacingA;
+  const ratioB = lensGrid.spacingB / referenceGrid.spacingB;
+  if (![ratioA, ratioB].every((value) => Number.isFinite(value) && value > 0.7 && value < 1.3)) {
+    throw new Error("Hai ảnh bị lệch vị trí hoặc khoảng cách quá nhiều. Giữ camera và lưới cố định rồi chụp lại.");
+  }
+  const pointScore = Math.min(1, Math.min(referenceGrid.points, lensGrid.points) / 42);
+  const consistency = Math.min(referenceGrid.consistency, lensGrid.consistency);
+  const angleDelta = angularDistance(referenceGrid.angle, lensGrid.angle);
+  const alignmentScore = Math.max(0, 1 - angleDelta / 12);
+  const quality = Math.round(100 * (0.42 * pointScore + 0.38 * consistency + 0.2 * alignmentScore));
+  return {
+    ratioA: clamp(ratioA, 0.7, 1.3),
+    ratioB: clamp(ratioB, 0.7, 1.3),
+    angle: normalizeAxis(referenceGrid.angle),
+    quality: clamp(quality, 0, 98),
+    referencePoints: referenceGrid.points,
+    lensPoints: lensGrid.points,
+  };
+}
+
+function extractGridMetrics(image: ImageData): GridMetrics {
+  const targetWidth = Math.min(420, image.width);
+  const scale = targetWidth / image.width;
+  const width = targetWidth;
+  const height = Math.max(1, Math.round(image.height * scale));
+  const gray = new Uint8Array(width * height);
+  let sum = 0;
+  let sumSq = 0;
+  for (let y = 0; y < height; y++) {
+    const sourceY = Math.min(image.height - 1, Math.floor(y / scale));
+    for (let x = 0; x < width; x++) {
+      const sourceX = Math.min(image.width - 1, Math.floor(x / scale));
+      const index = (sourceY * image.width + sourceX) * 4;
+      const value = Math.round(image.data[index] * 0.299 + image.data[index + 1] * 0.587 + image.data[index + 2] * 0.114);
+      gray[y * width + x] = value;
+      sum += value;
+      sumSq += value * value;
+    }
+  }
+  const mean = sum / gray.length;
+  const deviation = Math.sqrt(Math.max(0, sumSq / gray.length - mean * mean));
+  const threshold = mean - Math.max(18, deviation * 0.72);
+  const binary = new Uint8Array(gray.length);
+  const minX = Math.floor(width * 0.14);
+  const maxX = Math.ceil(width * 0.86);
+  const minY = Math.floor(height * 0.14);
+  const maxY = Math.ceil(height * 0.86);
+  for (let y = minY; y < maxY; y++) for (let x = minX; x < maxX; x++) {
+    const index = y * width + x;
+    if (gray[index] < threshold) binary[index] = 1;
+  }
+
+  const visited = new Uint8Array(binary.length);
+  const queue = new Int32Array(binary.length);
+  const points: Array<{ x: number; y: number }> = [];
+  const minArea = Math.max(3, Math.round(width * height * 0.000018));
+  const maxArea = Math.round(width * height * 0.0022);
+  for (let y = minY; y < maxY; y++) for (let x = minX; x < maxX; x++) {
+    const start = y * width + x;
+    if (!binary[start] || visited[start]) continue;
+    let head = 0;
+    let tail = 0;
+    let area = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let left = x;
+    let right = x;
+    let top = y;
+    let bottom = y;
+    queue[tail++] = start;
+    visited[start] = 1;
+    while (head < tail) {
+      const current = queue[head++];
+      const cx = current % width;
+      const cy = Math.floor(current / width);
+      area++; sumX += cx; sumY += cy;
+      left = Math.min(left, cx); right = Math.max(right, cx); top = Math.min(top, cy); bottom = Math.max(bottom, cy);
+      const neighbors = [current - 1, current + 1, current - width, current + width];
+      for (const next of neighbors) {
+        if (next < 0 || next >= binary.length || visited[next] || !binary[next]) continue;
+        const nx = next % width;
+        const ny = Math.floor(next / width);
+        if (nx < minX || nx >= maxX || ny < minY || ny >= maxY) continue;
+        visited[next] = 1;
+        queue[tail++] = next;
+      }
+    }
+    const componentWidth = right - left + 1;
+    const componentHeight = bottom - top + 1;
+    const aspect = componentWidth / Math.max(1, componentHeight);
+    const fill = area / (componentWidth * componentHeight);
+    if (area >= minArea && area <= maxArea && aspect > 0.45 && aspect < 2.2 && fill > 0.28) {
+      points.push({ x: sumX / area, y: sumY / area });
+    }
+  }
+  if (points.length < 8) return { points: points.length, spacingA: 0, spacingB: 0, angle: 0, consistency: 0 };
+
+  const pairs: Array<{ distance: number; angle: number }> = [];
+  for (let i = 0; i < points.length; i++) {
+    const nearest: Array<{ distance: number; angle: number }> = [];
+    for (let j = 0; j < points.length; j++) {
+      if (i === j) continue;
+      const dx = points[j].x - points[i].x;
+      const dy = points[j].y - points[i].y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > 4 && distance < Math.min(width, height) * 0.28) nearest.push({ distance, angle: Math.atan2(dy, dx) * 180 / Math.PI });
+    }
+    nearest.sort((a, b) => a.distance - b.distance);
+    pairs.push(...nearest.slice(0, 4));
+  }
+  const baseDistance = median(pairs.map((pair) => pair.distance).slice().sort((a, b) => a - b).slice(0, Math.max(8, Math.floor(pairs.length * 0.65))));
+  const closePairs = pairs.filter((pair) => Math.abs(pair.distance - baseDistance) < baseDistance * 0.3);
+  let sin = 0;
+  let cos = 0;
+  for (const pair of closePairs) {
+    const radians = pair.angle * Math.PI / 180 * 4;
+    sin += Math.sin(radians);
+    cos += Math.cos(radians);
+  }
+  const angle = normalizeAxis(Math.atan2(sin, cos) * 180 / Math.PI / 4);
+  const spacingAValues = axisDistances(closePairs, angle);
+  const spacingBValues = axisDistances(closePairs, angle + 90);
+  const spacingA = median(spacingAValues);
+  const spacingB = median(spacingBValues);
+  const variation = (coefficientOfVariation(spacingAValues) + coefficientOfVariation(spacingBValues)) / 2;
+  return { points: points.length, spacingA, spacingB, angle, consistency: clamp(1 - variation * 2.4, 0, 1) };
+}
+
+function axisDistances(pairs: Array<{ distance: number; angle: number }>, axis: number) {
+  const values = pairs.filter((pair) => angularDistance(pair.angle, axis) < 18).map((pair) => pair.distance).sort((a, b) => a - b);
+  return values.length ? values : pairs.map((pair) => pair.distance).sort((a, b) => a - b);
+}
+
+function coefficientOfVariation(values: number[]) {
+  if (!values.length) return 1;
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + (value - average) ** 2, 0) / values.length;
+  return Math.sqrt(variance) / Math.max(average, 0.001);
+}
+
+function median(values: number[]) {
+  if (!values.length) return 0;
+  const middle = Math.floor(values.length / 2);
+  return values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+}
+
+function normalizeAxis(value: number) {
+  const normalized = ((value % 180) + 180) % 180;
+  return normalized === 0 ? 180 : normalized;
+}
+
+function angularDistance(a: number, b: number) {
+  const delta = Math.abs((((a - b) % 180) + 180) % 180);
+  return Math.min(delta, 180 - delta);
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
 }
